@@ -13,11 +13,13 @@ KYIV_TZ = pytz.timezone('Europe/Kyiv')
 def utc_to_kyiv(dt):
     if dt is None:
         return None
-    if hasattr(dt, 'tzinfo') and dt.tzinfo is not None:
-        return dt.astimezone(KYIV_TZ)
-    if hasattr(dt, 'replace'):
-        dt = pytz.UTC.localize(dt)
-        return dt.astimezone(KYIV_TZ)
+    if isinstance(dt, datetime):
+        if dt.tzinfo is not None:
+            return dt.astimezone(KYIV_TZ)
+        return pytz.UTC.localize(dt).astimezone(KYIV_TZ)
+    if isinstance(dt, date):
+        dt = datetime.combine(dt, datetime.min.time())
+        return pytz.UTC.localize(dt).astimezone(KYIV_TZ)
     return dt
 
 
