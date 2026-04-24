@@ -1,6 +1,6 @@
 import logging
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, date
 import json
 import pytz
 from database.connection import DatabaseConnection
@@ -10,12 +10,15 @@ logger = logging.getLogger(__name__)
 KYIV_TZ = pytz.timezone('Europe/Kyiv')
 
 
-def utc_to_kyiv(dt: datetime) -> datetime:
+def utc_to_kyiv(dt):
     if dt is None:
         return None
-    if dt.tzinfo is None:
+    if hasattr(dt, 'tzinfo') and dt.tzinfo is not None:
+        return dt.astimezone(KYIV_TZ)
+    if hasattr(dt, 'replace'):
         dt = pytz.UTC.localize(dt)
-    return dt.astimezone(KYIV_TZ)
+        return dt.astimezone(KYIV_TZ)
+    return dt
 
 
 def now_kyiv() -> datetime:
