@@ -1,0 +1,28 @@
+# KeyCRM Scraper - Requirements
+
+# Web scraping and browser automation
+playwright==1.48.0
+
+# HTTP client
+httpx==0.25.2
+
+# PostgreSQL driver
+psycopg2-binary==2.9.9
+
+# Data validation
+pydantic==2.5.0
+
+# Timezone handling
+pytz==2024.1
+
+# Environment variables
+python-dotenv==1.0.0
+
+# Encryption for GitHub Secrets
+PyNaCl==1.5.0
+
+# Logging (built-in, no need to install)
+# logging
+
+# Optional: Progress bar
+# tqdm==4.66.1

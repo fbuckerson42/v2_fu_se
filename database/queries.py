@@ -1,0 +1,231 @@
+import logging
+from typing import Optional, Dict, Any, List
+from datetime import datetime
+import json
+import pytz
+from database.connection import DatabaseConnection
+
+logger = logging.getLogger(__name__)
+
+KYIV_TZ = pytz.timezone('Europe/Kyiv')
+
+
+def utc_to_kyiv(dt: datetime) -> datetime:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = pytz.UTC.localize(dt)
+    return dt.astimezone(KYIV_TZ)
+
+
+def now_kyiv() -> datetime:
+    return datetime.now(KYIV_TZ)
+
+
+class OrderQueries:
+    
+    def __init__(self, db: DatabaseConnection):
+        self.db = db
+    
+    def order_exists(self, order_id: int) -> bool:
+        query = "SELECT id FROM orders WHERE id = %s"
+        result = self.db.fetchone(query, (order_id,))
+        return result is not None
+    
+    def insert_order(self, order_data: Dict[str, Any]) -> None:
+        query = """
+            INSERT INTO orders (
+                id, created_at, closed_at,
+                status_id, status_name,
+                manager_id, manager_name,
+                grand_total, prp_date,
+                scraped_at, updated_at
+            ) VALUES (
+                %s, %s, %s,
+                %s, %s,
+                %s, %s,
+                %s, %s,
+                %s, %s
+            )
+        """
+        
+        params = (
+            order_data['id'],
+            utc_to_kyiv(order_data['created_at']),
+            utc_to_kyiv(order_data.get('closed_at')),
+            order_data['status_id'],
+            order_data['status_name'],
+            order_data['manager_id'],
+            order_data['manager_name'],
+            order_data['grand_total'],
+            order_data.get('prp_date'),
+            now_kyiv(),
+            now_kyiv()
+        )
+        
+        try:
+            self.db.execute(query, params)
+            logger.info(f"Inserted order {order_data['id']}")
+        except Exception as e:
+            logger.error(f"Failed to insert order {order_data['id']}: {e}")
+            raise
+    
+    def update_order(self, order_data: Dict[str, Any]) -> None:
+        query = """
+            UPDATE orders SET
+                created_at = %s,
+                closed_at = %s,
+                status_id = %s,
+                status_name = %s,
+                manager_id = %s,
+                manager_name = %s,
+                grand_total = %s,
+                prp_date = %s,
+                updated_at = %s
+            WHERE id = %s
+        """
+        
+        params = (
+            utc_to_kyiv(order_data['created_at']),
+            utc_to_kyiv(order_data.get('closed_at')),
+            order_data['status_id'],
+            order_data['status_name'],
+            order_data['manager_id'],
+            order_data['manager_name'],
+            order_data['grand_total'],
+            order_data.get('prp_date'),
+            now_kyiv(),
+            order_data['id']
+        )
+        
+        try:
+            self.db.execute(query, params)
+            logger.info(f"Updated order {order_data['id']}")
+        except Exception as e:
+            logger.error(f"Failed to update order {order_data['id']}: {e}")
+            raise
+    
+    def upsert_order(self, order_data: Dict[str, Any]) -> str:
+        if self.order_exists(order_data['id']):
+            self.update_order(order_data)
+            return 'updated'
+        else:
+            self.insert_order(order_data)
+            return 'inserted'
+    
+    def get_order_by_id(self, order_id: int) -> Optional[Dict[str, Any]]:
+        query = "SELECT * FROM orders WHERE id = %s"
+        return self.db.fetchone(query, (order_id,))
+    
+    def get_all_orders(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        query = "SELECT * FROM orders ORDER BY created_at DESC"
+        if limit:
+            query += f" LIMIT {limit}"
+        return self.db.fetchall(query)
+    
+    def get_orders_by_status(self, status_id: int) -> List[Dict[str, Any]]:
+        query = "SELECT * FROM orders WHERE status_id = %s ORDER BY created_at DESC"
+        return self.db.fetchall(query, (status_id,))
+    
+    def get_orders_by_manager(self, manager_id: int) -> List[Dict[str, Any]]:
+        query = "SELECT * FROM orders WHERE manager_id = %s ORDER BY created_at DESC"
+        return self.db.fetchall(query, (manager_id,))
+    
+    def get_orders_with_prp(self) -> List[Dict[str, Any]]:
+        query = "SELECT * FROM orders WHERE prp_date IS NOT NULL ORDER BY prp_date DESC"
+        return self.db.fetchall(query)
+    
+    def get_orders_without_prp(self) -> List[Dict[str, Any]]:
+        query = "SELECT * FROM orders WHERE prp_date IS NULL ORDER BY created_at DESC"
+        return self.db.fetchall(query)
+    
+    def get_statistics(self) -> Dict[str, Any]:
+        stats = {}
+        
+        query = "SELECT COUNT(*) as total FROM orders"
+        result = self.db.fetchone(query)
+        stats['total_orders'] = result['total'] if result else 0
+        
+        query = "SELECT COUNT(*) as total FROM orders WHERE prp_date IS NOT NULL"
+        result = self.db.fetchone(query)
+        stats['orders_with_prp'] = result['total'] if result else 0
+        
+        query = "SELECT COUNT(*) as total FROM orders WHERE prp_date IS NULL"
+        result = self.db.fetchone(query)
+        stats['orders_without_prp'] = result['total'] if result else 0
+        
+        query = "SELECT SUM(grand_total) as total FROM orders"
+        result = self.db.fetchone(query)
+        stats['total_amount'] = float(result['total']) if result and result['total'] else 0.0
+        
+        query = "SELECT MAX(scraped_at) as last_scraped FROM orders"
+        result = self.db.fetchone(query)
+        stats['last_scraped'] = result['last_scraped'] if result else None
+        
+        return stats
+    
+    def delete_order(self, order_id: int) -> None:
+        query = "DELETE FROM orders WHERE id = %s"
+        self.db.execute(query, (order_id,))
+        logger.warning(f"Deleted order {order_id}")
+    
+    def truncate_table(self) -> None:
+        query = "TRUNCATE TABLE orders"
+        self.db.execute(query)
+    
+    def batch_upsert_orders(self, orders_data: List[Dict[str, Any]]) -> Dict[str, int]:
+        if not orders_data:
+            return {'inserted': 0, 'updated': 0, 'errors': 0}
+        
+        query = """
+            INSERT INTO orders (
+                id, created_at, closed_at,
+                status_id, status_name,
+                manager_id, manager_name,
+                grand_total, prp_date,
+                scraped_at, updated_at
+            ) VALUES %s ON CONFLICT (id) DO UPDATE SET
+                created_at = EXCLUDED.created_at,
+                closed_at = EXCLUDED.closed_at,
+                status_id = EXCLUDED.status_id,
+                status_name = EXCLUDED.status_name,
+                manager_id = EXCLUDED.manager_id,
+                manager_name = EXCLUDED.manager_name,
+                grand_total = EXCLUDED.grand_total,
+                prp_date = EXCLUDED.prp_date,
+                updated_at = EXCLUDED.updated_at
+        """
+        
+        now = now_kyiv()
+        params_list = []
+        errors = 0
+        
+        for order_data in orders_data:
+            try:
+                params = (
+                    order_data['id'],
+                    utc_to_kyiv(order_data['created_at']),
+                    utc_to_kyiv(order_data.get('closed_at')),
+                    order_data['status_id'],
+                    order_data['status_name'],
+                    order_data['manager_id'],
+                    order_data['manager_name'],
+                    order_data['grand_total'],
+                    order_data.get('prp_date'),
+                    now,
+                    now
+                )
+                params_list.append(params)
+            except Exception as e:
+                errors += 1
+                logger.error(f"Failed to prepare order {order_data.get('id', 'unknown')}: {e}")
+        
+        if params_list:
+            try:
+                self.db.execute_batch(query, params_list)
+                logger.info(f"Batch upserted {len(params_list)} orders")
+            except Exception as e:
+                errors += len(params_list)
+                logger.error(f"Batch upsert failed: {e}")
+        
+        return {'inserted': 0, 'updated': len(params_list) - errors, 'errors': errors}

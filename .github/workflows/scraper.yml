@@ -1,0 +1,67 @@
+name: KeyCRM Scraper
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright/python:v1.48.0-jammy
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Run database migration
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          KEYCRM_BASE_URL: ${{ secrets.KEYCRM_BASE_URL }}
+          KEYCRM_WEB_URL: ${{ secrets.KEYCRM_WEB_URL }}
+          KEYCRM_LOGIN: ${{ secrets.KEYCRM_LOGIN }}
+          KEYCRM_PASSWORD: ${{ secrets.KEYCRM_PASSWORD }}
+        run: |
+          python main.py migrate
+      
+      # TEMP: Skip auth - using existing token from database
+      
+      - name: Run scraper
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          KEYCRM_BASE_URL: ${{ secrets.KEYCRM_BASE_URL }}
+          KEYCRM_WEB_URL: ${{ secrets.KEYCRM_WEB_URL }}
+          KEYCRM_FILTERS_URL: ${{ secrets.KEYCRM_FILTERS_URL }}
+          KEYCRM_LOGIN: ${{ secrets.KEYCRM_LOGIN }}
+          KEYCRM_PASSWORD: ${{ secrets.KEYCRM_PASSWORD }}
+          ORDERS_PER_PAGE: 100
+          REQUEST_TIMEOUT: 30
+          REQUEST_DELAY: 0.5
+          LOG_LEVEL: INFO
+          AUTO_REFRESH_TOKEN: true
+        run: |
+          python main.py scrape
+      
+      - name: Show statistics
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          KEYCRM_BASE_URL: ${{ secrets.KEYCRM_BASE_URL }}
+          KEYCRM_LOGIN: ${{ secrets.KEYCRM_LOGIN }}
+          KEYCRM_PASSWORD: ${{ secrets.KEYCRM_PASSWORD }}
+        run: |
+          python main.py stats
